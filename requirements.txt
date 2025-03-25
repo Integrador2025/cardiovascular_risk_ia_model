@@ -1,0 +1,28 @@
+# Manipulación de datos
+pandas
+numpy
+scipy
+
+# Preprocesamiento
+scikit-learn
+imbalanced-learn
+category_encoders
+missingno
+
+# Visualización
+matplotlib
+seaborn
+plotly
+
+# Modelado de Machine Learning
+xgboost
+lightgbm
+tensorflow
+torch
+
+# Evaluación e Interpretabilidad
+shap
+
+# API y Despliegue (Opcional)
+flask
+fastapi

@@ -1,0 +1,8 @@
+# Ignorar la carpeta virtual environment (.venv)
+.venv/
+
+# Ignorar la carpeta de caché de Python (__pycache__)
+__pycache__/
+
+# Ignorar carpetas de los datasets
+datasets/
