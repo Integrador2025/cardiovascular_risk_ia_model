@@ -6,3 +6,5 @@ __pycache__/
 
 # Ignorar carpetas de los datasets
 datasets/
+model/
+viejos/
