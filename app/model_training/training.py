@@ -10,8 +10,8 @@ from sklearn.metrics import (
     f1_score,
     mean_squared_error
 )
-from model_architecture import create_multitask_model
-from utils import save_model, plot_metrics, save_feature_importances
+from app.model_training.model_architecture import create_multitask_model
+from app.model_training.utils import save_model, plot_metrics, save_feature_importances
 
 def train_with_stratified_kfold(X, Y, feature_names, n_splits=20):
     """Entrena el modelo con validación cruzada pero guarda solo un modelo final"""
