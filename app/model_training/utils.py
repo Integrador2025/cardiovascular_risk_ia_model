@@ -14,8 +14,9 @@ def save_model(model, model_name="modelo_entrenado"):
 def plot_metrics(history, metric, save_path, branch='clasificacion'):
     """Genera y guarda gráficos de métricas de entrenamiento."""
     plt.figure(figsize=(8, 6))
-    plt.plot(history.history[f"{branch}_{metric}"], label=f"train {metric}")
-    plt.plot(history.history[f"val_{branch}_{metric}"], label=f"val {metric}")
+    key = f"{branch}_{metric}" if branch else metric
+    plt.plot(history.history[key], label=f"train {metric}")
+    plt.plot(history.history[f"val_{metric}"], label=f"val {metric}")
     plt.xlabel("Epochs")
     plt.ylabel(metric.capitalize())
     plt.legend()
