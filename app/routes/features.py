@@ -5,12 +5,22 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 from core.model_loader import load_model_and_features
 import tensorflow as tf
+from collections import defaultdict
 
 router = APIRouter(
     prefix="/v1/features",
     tags=["Features"],
     responses={404: {"description": "Not found"}}
 )
+
+# Mapeo de features a categorías
+CATEGORIAS = {
+    "Factores Médicos": ['EDAD', 'IMC', 'COLESTEROL', 'FUMADOR', 'ANTECEDENTES_FAMILIARES'],
+    "Condiciones Sociales": ['ESTADO_CIVIL', 'OCUPACION', 'NIVEL_EDUCATIVO', 'ESTRATO'],
+    "Infraestructura": ['ACCESO_ELECTRICO', 'ACUEDUCTO', 'ALCANTARILLADO', 'GAS_NATURAL', 'INTERNET'],
+    "Ambientales/Geográficas": ['DEPARTAMENTO', 'MUNICIPIO'],
+    "Otros Demográficos": ['SEXO', 'AREA', 'ETNIA']
+}
 
 class FeatureConfig(BaseModel):
     top_n: Optional[int] = None
@@ -28,7 +38,7 @@ def get_feature_weights(model) -> tuple:
     
     first_dense = dense_layers[0]
     weights = first_dense.get_weights()[0]
-    return np.mean(np.abs(weights), axis=1), weights.shape[1]
+    return np.mean(np.abs(weights), axis=1), weights.shape[0]
 
 @router.get(
     "/importance",
@@ -54,6 +64,9 @@ async def get_feature_importance(
             )
 
         importance, num_features = get_feature_weights(model)
+
+        print("número de Feature names: len(features_names)", len(feature_names))
+        print("número de num_features: num_features", num_features)
         
         # Validate feature names match
         if len(feature_names) != num_features:
@@ -257,3 +270,43 @@ async def get_least_important_features(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Least important feature calculation failed: {str(e)}"
         )
+    
+@router.get("/por-categoria")
+async def importancia_por_categoria(incluir_geo: bool = False):
+    try:
+        model, feature_names = load_model_and_features()
+        if model is None:
+            raise HTTPException(status_code=404, detail="Modelo no encontrado")
+
+        first_dense = next((layer for layer in model.layers if hasattr(layer, 'kernel')), None)
+        if first_dense is None:
+            raise HTTPException(status_code=500, detail="No se encontró una capa densa con pesos")
+
+        pesos = first_dense.get_weights()[0]
+        importancias = dict(zip(feature_names, np.mean(np.abs(pesos), axis=1)))
+
+        resumen = defaultdict(float)
+
+        for feat, valor in importancias.items():
+            asignado = False
+            for categoria, base_names in CATEGORIAS.items():
+                if any(feat.startswith(base) for base in base_names):
+                    if not incluir_geo and categoria == "Ambientales/Geográficas":
+                        continue
+                    resumen[categoria] += float(valor)
+                    asignado = True
+                    break
+            if not asignado:
+                resumen["Otras"] += float(valor)
+
+        total = sum(resumen.values())
+        porcentajes = {cat: round(float(val / total), 4) for cat, val in resumen.items()}
+
+        return {
+            "totales": resumen,
+            "porcentajes": porcentajes,
+            "nota": "Basado en la primera capa densa del modelo. Se agruparon variables por tipo semántico."
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al calcular importancias por categoría: {str(e)}")

@@ -1,28 +1,23 @@
 from pydantic import BaseModel
 from typing import Optional
 
-class PacienteBase(BaseModel):
-    EDAD: float
-    IMC: float
-    SEXO: float
-    COLESTEROL: float
-    ESTRATO: float
-    NIVEL_EDUCATIVO: float
-    ACCESO_ELECTRICO: float
-    ACUEDUCTO: float
-    ALCANTARILLADO: float
-    GAS_NATURAL: float
-    ANTECEDENTES_FAMILIARES: float
-    FUMADOR: float
+class PacienteInput(BaseModel):
     DEPARTAMENTO: str
     MUNICIPIO: str
+    SEXO: int
+    EDAD: float
     ESTADO_CIVIL: str
+    NIVEL_EDUCATIVO: str
+    ESTRATO: str
     AREA: str
-    INTERNET: str
+    ACCESO_ELECTRICO: int
+    ACUEDUCTO: int
+    ALCANTARILLADO: int
+    GAS_NATURAL: int
+    INTERNET: int
     ETNIA: str
     OCUPACION: str
-
-class PrediccionResponse(BaseModel):
-    riesgo_cardiovascular: int
-    puntaje_riesgo: float
-    probabilidades: list[float]
+    IMC: float
+    ANTECEDENTES_FAMILIARES: int
+    FUMADOR: int
+    COLESTEROL: float

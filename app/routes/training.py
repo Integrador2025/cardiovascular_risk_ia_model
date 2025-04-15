@@ -6,6 +6,7 @@ from app.model_training.data_processing import preprocess_data
 from app.model_training.training import train_with_stratified_kfold
 from core.model_loader import load_model_and_features, MODEL_PATH
 from app.model_training.utils import plot_metrics, save_feature_importances
+from app.model_population.training_population import train_population_model
 
 router = APIRouter()
 
@@ -46,3 +47,16 @@ async def train_model():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/entrenar-modelo-poblacional")
+async def entrenar_modelo_poblacional():
+    try:
+        model, history = train_population_model()
+        return {
+            "mensaje": "Modelo poblacional complejo entrenado exitosamente.",
+            "epochs": len(history.history["loss"]),
+            "loss_final": round(history.history["loss"][-1], 4),
+            "mae_final": round(history.history["mae"][-1], 4)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error durante el entrenamiento: {str(e)}")
