@@ -4,7 +4,7 @@ import load
 from core.model_loader import load_model_and_features
 from app.model_training.data_processing import preprocess_data
 
-router = APIRouter()
+router = APIRouter(prefix="/v1/analysis", tags=["Analysis"])
 
 @router.get("/importancia-municipio/{municipio}")
 async def importancia_por_municipio(municipio: str):
@@ -14,8 +14,8 @@ async def importancia_por_municipio(municipio: str):
             raise HTTPException(status_code=404, detail="Modelo no encontrado")
 
         df, _, _ = load.load_dataset()
-        df['MUNICIPIO'] = df['MUNICIPIO'].astype(str)
-        df_filtrado = df[df['MUNICIPIO'].str.upper() == municipio.upper()]
+        df['municipality'] = df['municipality'].astype(str)  # Updated column name
+        df_filtrado = df[df['municipality'].str.upper() == municipio.upper()]  # Updated column name
 
         if df_filtrado.empty:
             raise HTTPException(status_code=404, detail=f"No se encontraron datos para el municipio '{municipio}'")
@@ -40,7 +40,7 @@ async def importancia_por_municipio(municipio: str):
 
         resultado = [
             (name, imp) for name, imp in importancia_ponderada
-            if not (name.startswith("MUNICIPIO_") or name.startswith("DEPARTAMENTO_"))
+            if not (name.startswith("municipality_") or name.startswith("department_"))  # Updated prefixes
         ]
 
         resultado.sort(key=lambda x: x[1], reverse=True)

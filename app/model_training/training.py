@@ -10,7 +10,7 @@ def train_with_stratified_kfold(X, Y_reg, feature_names, n_splits=5):
     """Entrena el modelo de regresión con validación cruzada estratificada."""
     
     # Crear etiquetas simuladas para estratificación por puntaje (usamos bins)
-    bins = np.digitize(Y_reg, bins=np.percentile(Y_reg, [20, 40, 60, 80]))
+    bins = np.digitize(Y_reg, bins=[0.0, 0.3, 0.5, 0.7, 0.9, 1.1])
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
     all_mse = []

@@ -3,72 +3,78 @@ import pandas as pd
 from sklearn.preprocessing import RobustScaler
 
 def preprocess_data(df, augment=False, noise_std=0.01, augment_factor=1):
-    """Preprocesa los datos para el entrenamiento del modelo, con opción de data augmentation."""
-
-    # Asegurar que trabajamos sobre una copia del DataFrame original
+    """Preprocess data for model training, with optional data augmentation."""
+    
     df = df.copy()
+    
+    # Rename target columns
+    df = df.rename(columns={
+        'risk_score': 'target_score',
+        'cardiovascular_risk': 'target_risk_category'
+    })
 
-    # Convertir fecha a datetime
-    df["FECHA_DIAGNOSTICO"] = pd.to_datetime(df["FECHA_DIAGNOSTICO"], errors='coerce')
+    # Convert date to datetime
+    df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
 
-    # Extraer componentes temporales útiles
-    df["AÑO_DIAGNOSTICO"] = df["FECHA_DIAGNOSTICO"].dt.year
-    df["MES_DIAGNOSTICO"] = df["FECHA_DIAGNOSTICO"].dt.month
-    df["TRIMESTRE"] = "T" + df["FECHA_DIAGNOSTICO"].dt.quarter.astype(str)
-    df["SEMANA_DEL_AÑO"] = df["FECHA_DIAGNOSTICO"].dt.isocalendar().week.astype(int)
-    df["DIAS_DESDE_DIAGNOSTICO"] = (pd.Timestamp.today() - df["FECHA_DIAGNOSTICO"]).dt.days
-    df["ES_PANDEMIA"] = df["AÑO_DIAGNOSTICO"].apply(lambda y: 1 if y in [2020, 2021, 2022] else 0)
+    # Extract temporal features - mantener trimestre como categórica
+    df["diagnosis_year"] = df["diagnosis_date"].dt.year
+    df["diagnosis_month"] = df["diagnosis_date"].dt.month
+    df["diagnosis_trimester"] = "T" + df["diagnosis_date"].dt.quarter.astype(str)  # Cambiado a trimester
+    df["days_since_diagnosis"] = (pd.Timestamp.today() - df["diagnosis_date"]).dt.days
+    df["pandemic_period"] = df["diagnosis_year"].apply(lambda y: 1 if y in [2020, 2021, 2022] else 0)
 
-    # Variables objetivo
-    Y_reg = df["PUNTAJE_RIESGO"].astype(float)
+    # Target variables
+    Y_reg = df["target_score"].astype(float)
 
-    # Columnas numéricas y categóricas
+    # Definir features - diagnosis_trimester va en categóricas
     numeric_features = [
-        'EDAD', 'IMC', 'SEXO', 'COLESTEROL',
-        'ACCESO_ELECTRICO', 'ACUEDUCTO', 'ALCANTARILLADO', 'GAS_NATURAL',
-        'ANTECEDENTES_FAMILIARES', 'FUMADOR',
-        'AÑO_DIAGNOSTICO', 'MES_DIAGNOSTICO', 'SEMANA_DEL_AÑO',
-        'DIAS_DESDE_DIAGNOSTICO', 'ES_PANDEMIA'
+        'age', 'bmi', 'heart_rate', 'total_cholesterol', 'glucose',
+        'is_smoker', 'bpm_meds', 'diabetes', 'rural_area',
+        'has_electricity', 'has_water_supply', 'has_gas', 
+        'has_internet', 'family_history',
+        'diagnosis_year', 'diagnosis_month', 'days_since_diagnosis', 'pandemic_period'
     ]
 
     categorical_features = [
-        'DEPARTAMENTO', 'MUNICIPIO', 'ESTADO_CIVIL', 'AREA', 'ESTRATO',
-        'NIVEL_EDUCATIVO', 'INTERNET', 'ETNIA', 'OCUPACION',
-        'TRIMESTRE'
+        'department', 'municipality', 'sex', 'marital_status',
+        'education_level', 'socioeconomic_status', 'occupation', 'ethnicity',
+        'diagnosis_trimester'  # Incluida como categórica
     ]
 
-    # Separar características (X) y eliminar columnas objetivo
-    X = df.drop(columns=["RIESGO_CARDIOVASCULAR", "PUNTAJE_RIESGO", "FECHA_DIAGNOSTICO"])
+    # Separar características
+    X = df.drop(columns=["target_risk_category", "target_score", "diagnosis_date"])
 
-    # Convertir columnas numéricas a float
+    # Convertir y limpiar datos
     for col in numeric_features:
         X[col] = pd.to_numeric(X[col], errors='coerce')
-
-    # Convertir columnas categóricas a categoría
+    
     for col in categorical_features:
         X[col] = X[col].astype("category")
 
-    # Eliminar filas con valores faltantes
-    X.dropna(inplace=True)
-    Y_reg = Y_reg.loc[X.index]  # Alinear Y con X
+    # Verificación adicional
+    non_numeric = X.select_dtypes(exclude=['number', 'category']).columns
+    if not non_numeric.empty:
+        raise ValueError(f"Columnas no procesadas correctamente: {list(non_numeric)}")
 
-    # Escalado robusto de variables numéricas
+    X.dropna(inplace=True)
+    Y_reg = Y_reg.loc[X.index]
+
+    # Escalado y encoding
     scaler_numeric = RobustScaler()
     X[numeric_features] = scaler_numeric.fit_transform(X[numeric_features])
-
-    # One-hot encoding para las categóricas
     X = pd.get_dummies(X, columns=categorical_features)
 
-    # Convertir a numpy arrays
+    # Convertir a arrays
     X_array = X.values.astype(np.float32)
     Y_reg_array = Y_reg.values.astype(np.float32)
     feature_names = X.columns.tolist()
 
-    # Data augmentation (si se solicita)
+    # Data augmentation (opcional)
     if augment:
         augmented_X = []
         augmented_Y_reg = []
         for _ in range(augment_factor):
+            # Solo aplicar ruido a features numéricas originales
             noise = np.random.normal(0, noise_std, X_array[:, :len(numeric_features)].shape)
             X_aug = X_array.copy()
             X_aug[:, :len(numeric_features)] += noise

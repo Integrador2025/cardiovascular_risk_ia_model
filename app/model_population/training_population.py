@@ -1,10 +1,12 @@
-from app.model_population.data_processing_population import load_and_group_population_data, preprocess_population_data
+from app.model_population.data_processing_population import (
+    load_and_group_population_data, 
+    preprocess_population_data
+)
 from app.model_population.model_architecture_population import build_population_model
 from app.model_config import PACIENTES_PATH, MUNICIPIOS_PATH
 import tensorflow as tf
 
 MODEL_PATH = "model/population_model.keras"
-
 
 def train_population_model():
     print("🔍 Cargando y procesando datos...")
@@ -20,10 +22,14 @@ def train_population_model():
         validation_data=(X_test, y_test),
         epochs=300,
         batch_size=32,
-        verbose=1
+        verbose=1,
+        callbacks=[
+            tf.keras.callbacks.EarlyStopping(patience=20, restore_best_weights=True),
+            tf.keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=10)
+        ]
     )
 
-    print("💾 Guardando modelo en formato .keras...")
+    print("💾 Guardando modelo...")
     model.save(MODEL_PATH)
 
     print("✅ Entrenamiento completo.")

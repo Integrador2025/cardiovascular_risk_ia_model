@@ -3,71 +3,153 @@ import pandas as pd
 import numpy as np
 import joblib
 import tensorflow as tf
-from app.model_population.data_processing_population import normalize_column_names, convertir_precipitacion
+import os
+from app.model_population.data_processing_population import convert_precipitation
 from app.model_config import PACIENTES_PATH, MUNICIPIOS_PATH
 from app.model_population.utils_population import load_population_model
 
-router = APIRouter()
+router = APIRouter(prefix="/v1/population", tags=["Population Prediction"])
 
 @router.get("/riesgo-poblacional/{municipio}")
 async def predecir_riesgo_poblacional(municipio: str):
+    """
+    Predict population risk for a given municipality by demographic groups
+    
+    Returns:
+    - Average risk score
+    - Risk by demographic groups
+    - Number of groups analyzed
+    """
     try:
-        df_pac = pd.read_csv(PACIENTES_PATH)
-        df_mun = pd.read_csv(MUNICIPIOS_PATH)
+        # 1. Verify model files exist (removed columns.pkl check)
+        required_files = {
+            "model": "population_model.keras",
+            "scaler": "population_scaler.pkl",
+            "encoder": "population_encoder.pkl"
+        }
+        
+        missing_files = []
+        for file in required_files.values():
+            if not os.path.exists(f"model/{file}"):
+                missing_files.append(file)
+        
+        if missing_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model files missing: {', '.join(missing_files)}. Please train the model first."
+            )
 
-        df_pac = normalize_column_names(df_pac)
-        df_mun = normalize_column_names(df_mun)
+        # 2. Load and merge data
+        try:
+            df_pac = pd.read_csv(PACIENTES_PATH)
+            df_mun = pd.read_csv(MUNICIPIOS_PATH)
+            
+            # Normalize column names to lowercase
+            df_pac.columns = df_pac.columns.str.lower()
+            df_mun.columns = df_mun.columns.str.lower()
+            
+            df = df_pac.merge(df_mun, on=["department", "municipality"], how="left")
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error loading data: {str(e)}"
+            )
 
-        df = df_pac.merge(df_mun, on=["DEPARTAMENTO", "MUNICIPIO"], how="left")
+        # 3. Process precipitation data
+        if "annual_precipitation" in df.columns:
+            df["annual_precipitation"] = df["annual_precipitation"].astype(str).apply(convert_precipitation)
 
-        if "PRECIPITACION ANUAL" in df.columns:
-            df["PRECIPITACION ANUAL"] = df["PRECIPITACION ANUAL"].astype(str).apply(convertir_precipitacion)
-
-        df_mpio = df[df["MUNICIPIO"].str.strip().str.upper() == municipio.strip().upper()]
+        # 4. Filter by municipality
+        df_mpio = df[df["municipality"].str.strip().str.upper() == municipio.strip().upper()]
         if df_mpio.empty:
-            raise HTTPException(status_code=404, detail="Municipio no encontrado")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data found for municipality: {municipio}"
+            )
 
+        # 5. Group by demographic characteristics
         grupos = df_mpio.groupby([
-            "AREA", "ESTRATO", "ETNIA", "OCUPACION", "NIVEL_EDUCATIVO",
-            "CLASIFICACION CLIMATICA"
+            "rural_area", "socioeconomic_status", "ethnicity", 
+            "occupation", "education_level", "climate_classification"
         ], as_index=False).agg({
-            "EDAD": "mean",
-            "IMC": "mean",
-            "COLESTEROL": "mean",
-            "FUMADOR": "mean",
-            "ANTECEDENTES_FAMILIARES": "mean",
-            "ACCESO_ELECTRICO": "mean",
-            "ACUEDUCTO": "mean",
-            "ALCANTARILLADO": "mean",
-            "GAS_NATURAL": "mean",
-            "INTERNET": "mean",
-            "LATITUD": "first",
-            "LONGITUD": "first",
-            "ALTITUD MEDIA": "first",
-            "TEMPERATURA PROMEDIO": "first",
-            "PRECIPITACION ANUAL": "first",
-            "POBLACION ESTIMADA": "first"
+            "age": "mean",
+            "bmi": "mean",
+            "total_cholesterol": "mean",
+            "is_smoker": "mean",
+            "family_history": "mean",
+            "has_electricity": "mean",
+            "has_water_supply": "mean",
+            "has_sewage": "mean",
+            "has_gas": "mean",
+            "has_internet": "mean",
+            "latitude": "first",
+            "longitude": "first",
+            "average_altitude": "first",
+            "average_temperature": "first",
+            "annual_precipitation": "first",
+            "estimated_population": "first"
         })
 
-        model, scaler, encoder, feature_names = load_population_model()
+        # 6. Load model and preprocessors (without columns file)
+        try:
+            model = tf.keras.models.load_model("model/population_model.keras")
+            scaler = joblib.load("model/population_scaler.pkl")
+            encoder = joblib.load("model/population_encoder.pkl")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error loading model: {str(e)}"
+            )
 
-        categorical_cols = ["AREA", "ESTRATO", "ETNIA", "OCUPACION", "NIVEL_EDUCATIVO", "CLASIFICACION CLIMATICA"]
-        numerical_cols = [col for col in grupos.columns if col not in categorical_cols]
+        # 7. Prepare features - define columns dynamically
+        categorical_cols = [
+            "rural_area", "socioeconomic_status", "ethnicity",
+            "occupation", "education_level", "climate_classification"
+        ]
+        numerical_cols = [
+            col for col in grupos.columns 
+            if col not in categorical_cols + ["estimated_population"]
+        ]
 
-        encoded_cat = encoder.transform(grupos[categorical_cols])
-        scaled_num = scaler.transform(grupos[numerical_cols])
-        X = np.concatenate([scaled_num, encoded_cat], axis=1)
+        try:
+            # Process categorical features
+            encoded_cat = encoder.transform(grupos[categorical_cols])
+            
+            # Process numerical features
+            scaled_num = scaler.transform(grupos[numerical_cols])
+            
+            # Combine features
+            X = np.concatenate([scaled_num, encoded_cat], axis=1)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error preprocessing data: {str(e)}"
+            )
 
-        predicciones = model.predict(X).flatten().tolist()
+        # 8. Make predictions
+        try:
+            predicciones = model.predict(X).flatten()
+            grupos["risk_estimate"] = predicciones.tolist()
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Prediction failed: {str(e)}"
+            )
 
-        grupos["RIESGO_ESTIMADO"] = predicciones
-
-        return {
+        # 9. Prepare response
+        response_data = {
             "municipio": municipio,
             "n_grupos": len(grupos),
-            "riesgo_promedio_total": round(np.mean(predicciones), 4),
-            "grupos": grupos[categorical_cols + ["RIESGO_ESTIMADO"]].to_dict(orient="records")
+            "riesgo_promedio_total": round(float(np.mean(predicciones)), 4),
+            "grupos": grupos[categorical_cols + ["risk_estimate"]].to_dict(orient="records")
         }
 
+        return response_data
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en la prediccion: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        )

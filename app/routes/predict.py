@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from core.model_loader import load_model_and_features
 from app.model_training.data_processing import preprocess_data
-from app.model_training.schemas import PacienteInput  # Asegúrate de tener este modelo
+from app.model_training.schemas import PatientInput
 import tensorflow as tf
 
 router = APIRouter(prefix="/v1/modelo", tags=["Modelo"])
@@ -21,7 +21,7 @@ def categorizar_riesgo(puntaje: float) -> str:
         return "Muy Alto"
 
 @router.post("/predict")
-async def predecir_riesgo(paciente: PacienteInput):
+async def predecir_riesgo(paciente: PatientInput):
     try:
         model, feature_names = load_model_and_features()
         if model is None:
@@ -30,12 +30,12 @@ async def predecir_riesgo(paciente: PacienteInput):
         # Convertir input a DataFrame
         df_input = pd.DataFrame([paciente.dict()])
 
-        # Columnas dummy para que preprocess_data no falle
-        df_input["PUNTAJE_RIESGO"] = 0
-        df_input["RIESGO_CARDIOVASCULAR"] = 0  # ← necesaria para evitar error
-        df_input["FECHA_DIAGNOSTICO"] = pd.Timestamp("2024-01-01")  
+        # Columnas dummy para que preprocess_data no falle (actualizadas a nombres en inglés)
+        df_input["risk_score"] = 0  # Antes PUNTAJE_RIESGO
+        df_input["cardiovascular_risk"] = 0  # Antes RIESGO_CARDIOVASCULAR
+        df_input["diagnosis_date"] = pd.Timestamp("2024-01-01")  # Antes FECHA_DIAGNOSTICO
 
-        # Preprocesar datos del paciente (sin augment ni filtrado)
+        # Preprocesar datos del paciente
         X_input, _, _, features_input = preprocess_data(df_input)
 
         # Alinear con el orden de features esperadas por el modelo
@@ -51,8 +51,11 @@ async def predecir_riesgo(paciente: PacienteInput):
 
         # Calcular importancia de features para esta predicción
         first_dense = next((layer for layer in model.layers if hasattr(layer, 'kernel')), None)
-        pesos = first_dense.get_weights()[0]  # (features, neuronas)
-        importancia = np.abs(pesos[:, 0])     # suma o magnitud de cada feature
+        if first_dense is None:
+            raise HTTPException(status_code=500, detail="No se encontró capa densa en el modelo")
+            
+        pesos = first_dense.get_weights()[0]
+        importancia = np.abs(pesos[:, 0])
         activaciones = X_alineado[0]
         ponderadas = importancia * activaciones
 
@@ -62,7 +65,11 @@ async def predecir_riesgo(paciente: PacienteInput):
         return {
             "puntaje_riesgo": round(pred, 4),
             "categoria": categoria,
+            "factores_relevantes": top_features,
+            "nota": "Factores relevantes calculados como activación * peso en la primera capa densa"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en predicción: {str(e)}")

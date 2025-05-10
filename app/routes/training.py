@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 import os
 import tensorflow as tf
 import load
+import pandas as pd
 from app.model_training.data_processing import preprocess_data
 from app.model_training.training import train_with_stratified_kfold
 from core.model_loader import load_model_and_features, MODEL_PATH
@@ -9,6 +10,8 @@ from app.model_training.utils import plot_metrics, save_feature_importances
 from app.model_population.training_population import train_population_model
 
 router = APIRouter()
+
+router = APIRouter(prefix="/v1/training", tags=["Training"])
 
 @router.post("/train-model/")
 async def train_model():
@@ -51,6 +54,21 @@ async def train_model():
 @router.post("/entrenar-modelo-poblacional")
 async def entrenar_modelo_poblacional():
     try:
+        # Verificar disponibilidad de datos primero
+        try:
+            df_pac, df_mun, _ = load.load_dataset()
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=400, detail=f"Archivo no encontrado: {str(e)}")
+
+        # Verificar columnas requeridas
+        required_columns = ["department", "municipality"]  # Ajustar según tus nombres reales
+        for col in required_columns:
+            if col not in df_pac.columns or col not in df_mun.columns:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Columna requerida '{col}' no encontrada en los datos"
+                )
+
         model, history = train_population_model()
         return {
             "mensaje": "Modelo poblacional complejo entrenado exitosamente.",
@@ -58,5 +76,10 @@ async def entrenar_modelo_poblacional():
             "loss_final": round(history.history["loss"][-1], 4),
             "mae_final": round(history.history["mae"][-1], 4)
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error durante el entrenamiento: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error durante el entrenamiento: {str(e)}"
+        )

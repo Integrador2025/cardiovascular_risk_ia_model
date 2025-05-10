@@ -41,22 +41,20 @@ async def resumen_por_departamento(top_n: int = 5):
 
         df, _, _ = load.load_dataset()
 
-        if 'DEPARTAMENTO' not in df.columns or 'PUNTAJE_RIESGO' not in df.columns:
+        if 'department' not in df.columns or 'risk_score' not in df.columns:
             raise HTTPException(status_code=400, detail="Datos insuficientes para agrupar por departamento")
 
-        departamentos = df['DEPARTAMENTO'].unique()
+        departamentos = df['department'].unique()
         resumen = []
 
         for depto in departamentos:
-            df_depto = df[df['DEPARTAMENTO'] == depto]
+            df_depto = df[df['department'] == depto]
 
-            if df_depto.empty or len(df_depto) < 10:  # omitir grupos muy pequeños
+            if df_depto.empty or len(df_depto) < 10:
                 continue
 
-            # Preprocesar solo este subconjunto
             X_depto, Y_depto, _, feature_names_local = preprocess_data(df_depto, augment=False)
             
-            # Obtener pesos del modelo
             first_dense = next((layer for layer in model.layers if hasattr(layer, 'kernel')), None)
             if first_dense is None:
                 continue
@@ -68,7 +66,7 @@ async def resumen_por_departamento(top_n: int = 5):
             importancia_ponderada = [
                 (name, float(activacion * importancia.get(name, 0)))
                 for name, activacion in zip(feature_names_local, activacion_media)
-                if not name.startswith("DEPARTAMENTO_") and not name.startswith("MUNICIPIO_")
+                if not name.startswith("department_") and not name.startswith("municipality_")
             ]
             importancia_ponderada.sort(key=lambda x: x[1], reverse=True)
 
@@ -100,14 +98,14 @@ async def resumen_por_municipio(top_n: int = 5, min_pacientes: int = 10):
 
         df, _, _ = load.load_dataset()
 
-        if 'MUNICIPIO' not in df.columns or 'PUNTAJE_RIESGO' not in df.columns:
+        if 'municipality' not in df.columns or 'risk_score' not in df.columns:
             raise HTTPException(status_code=400, detail="Datos insuficientes para agrupar por municipio")
 
-        municipios = df['MUNICIPIO'].unique()
+        municipios = df['municipality'].unique()
         resumen = []
 
         for mpio in municipios:
-            df_mpio = df[df['MUNICIPIO'] == mpio]
+            df_mpio = df[df['municipality'] == mpio]
 
             if df_mpio.empty or len(df_mpio) < min_pacientes:
                 continue
@@ -125,7 +123,7 @@ async def resumen_por_municipio(top_n: int = 5, min_pacientes: int = 10):
             importancia_ponderada = [
                 (name, float(activacion * importancia.get(name, 0)))
                 for name, activacion in zip(feature_names_local, activacion_media)
-                if not name.startswith("DEPARTAMENTO_") and not name.startswith("MUNICIPIO_")
+                if not name.startswith("department_") and not name.startswith("municipality_")
             ]
             importancia_ponderada.sort(key=lambda x: x[1], reverse=True)
 
@@ -147,12 +145,12 @@ async def analisis_por_ocupacion(min_pacientes: int = 10):
     try:
         df, _, _ = load.load_dataset()
 
-        if "OCUPACION" not in df.columns or "PUNTAJE_RIESGO" not in df.columns:
+        if "occupation" not in df.columns or "risk_score" not in df.columns:
             raise HTTPException(status_code=400, detail="Faltan columnas necesarias")
 
-        agrupado = df.groupby("OCUPACION").agg(
-            promedio_riesgo=("PUNTAJE_RIESGO", "mean"),
-            total_pacientes=("PUNTAJE_RIESGO", "count")
+        agrupado = df.groupby("occupation").agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
         ).reset_index()
 
         agrupado = agrupado[agrupado["total_pacientes"] >= min_pacientes]
@@ -168,23 +166,21 @@ async def analisis_por_edad():
     try:
         df, _, _ = load.load_dataset()
 
-        # Eliminar filas con datos faltantes
-        df = df[df["EDAD"].notnull() & df["PUNTAJE_RIESGO"].notnull()]
+        df = df[df["age"].notnull() & df["risk_score"].notnull()]
 
         bins = [0, 18, 30, 45, 60, 75, 120]
         labels = ["0-18", "19-30", "31-45", "46-60", "61-75", "76+"]
 
-        df["grupo_edad"] = pd.cut(df["EDAD"], bins=bins, labels=labels, right=False)
+        df["grupo_edad"] = pd.cut(df["age"], bins=bins, labels=labels, right=False)
 
         agrupado = df.groupby("grupo_edad", observed=False).agg(
-            promedio_riesgo=("PUNTAJE_RIESGO", "mean"),
-            total_pacientes=("PUNTAJE_RIESGO", "count")
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
         ).reset_index()
 
         agrupado = agrupado.dropna(subset=["promedio_riesgo"])
         agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
 
-        # Asegurar serialización compatible con JSON
         agrupado["grupo_edad"] = agrupado["grupo_edad"].astype(str)
         agrupado["promedio_riesgo"] = agrupado["promedio_riesgo"].astype(float)
         agrupado["total_pacientes"] = agrupado["total_pacientes"].astype(int)
@@ -200,20 +196,20 @@ async def analisis_por_nivel_educativo(min_pacientes: int = 10):
     try:
         df, _, _ = load.load_dataset()
 
-        if "NIVEL_EDUCATIVO" not in df.columns or "PUNTAJE_RIESGO" not in df.columns:
+        if "education_level" not in df.columns or "risk_score" not in df.columns:
             raise HTTPException(status_code=400, detail="Faltan columnas necesarias")
 
-        df = df[df["PUNTAJE_RIESGO"].notnull() & df["NIVEL_EDUCATIVO"].notnull()]
+        df = df[df["risk_score"].notnull() & df["education_level"].notnull()]
 
-        agrupado = df.groupby("NIVEL_EDUCATIVO").agg(
-            promedio_riesgo=("PUNTAJE_RIESGO", "mean"),
-            total_pacientes=("PUNTAJE_RIESGO", "count")
+        agrupado = df.groupby("education_level").agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
         ).reset_index()
 
         agrupado = agrupado[agrupado["total_pacientes"] >= min_pacientes]
         agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
 
-        agrupado["NIVEL_EDUCATIVO"] = agrupado["NIVEL_EDUCATIVO"].astype(str)
+        agrupado["education_level"] = agrupado["education_level"].astype(str)
         agrupado["promedio_riesgo"] = agrupado["promedio_riesgo"].astype(float)
         agrupado["total_pacientes"] = agrupado["total_pacientes"].astype(int)
         agrupado["categoria"] = agrupado["categoria"].astype(str)
@@ -228,20 +224,20 @@ async def analisis_por_estrato(min_pacientes: int = 10):
     try:
         df, _, _ = load.load_dataset()
 
-        if "ESTRATO" not in df.columns or "PUNTAJE_RIESGO" not in df.columns:
+        if "socioeconomic_status" not in df.columns or "risk_score" not in df.columns:
             raise HTTPException(status_code=400, detail="Faltan columnas necesarias")
 
-        df = df[df["PUNTAJE_RIESGO"].notnull() & df["ESTRATO"].notnull()]
+        df = df[df["risk_score"].notnull() & df["socioeconomic_status"].notnull()]
 
-        agrupado = df.groupby("ESTRATO").agg(
-            promedio_riesgo=("PUNTAJE_RIESGO", "mean"),
-            total_pacientes=("PUNTAJE_RIESGO", "count")
+        agrupado = df.groupby("socioeconomic_status").agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
         ).reset_index()
 
         agrupado = agrupado[agrupado["total_pacientes"] >= min_pacientes]
         agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
 
-        agrupado["ESTRATO"] = agrupado["ESTRATO"].astype(str)
+        agrupado["socioeconomic_status"] = agrupado["socioeconomic_status"].astype(str)
         agrupado["promedio_riesgo"] = agrupado["promedio_riesgo"].astype(float)
         agrupado["total_pacientes"] = agrupado["total_pacientes"].astype(int)
         agrupado["categoria"] = agrupado["categoria"].astype(str)
@@ -255,17 +251,17 @@ async def analisis_por_estrato(min_pacientes: int = 10):
 async def analisis_por_año():
     try:
         df, _, _ = load.load_dataset()
-        df["FECHA_DIAGNOSTICO"] = pd.to_datetime(df["FECHA_DIAGNOSTICO"], errors='coerce')
-        df = df[df["PUNTAJE_RIESGO"].notnull() & df["FECHA_DIAGNOSTICO"].notnull()]
+        df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
+        df = df[df["risk_score"].notnull() & df["diagnosis_date"].notnull()]
 
-        df["AÑO_DIAGNOSTICO"] = df["FECHA_DIAGNOSTICO"].dt.year
-        agrupado = df.groupby("AÑO_DIAGNOSTICO").agg(
-            promedio_riesgo=("PUNTAJE_RIESGO", "mean"),
-            total_pacientes=("PUNTAJE_RIESGO", "count")
+        df["diagnosis_year"] = df["diagnosis_date"].dt.year
+        agrupado = df.groupby("diagnosis_year").agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
         ).reset_index()
 
         agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
-        agrupado["AÑO_DIAGNOSTICO"] = agrupado["AÑO_DIAGNOSTICO"].astype(int)
+        agrupado["diagnosis_year"] = agrupado["diagnosis_year"].astype(int)
 
         return agrupado.to_dict(orient="records")
 
@@ -276,17 +272,17 @@ async def analisis_por_año():
 async def analisis_por_trimestre():
     try:
         df, _, _ = load.load_dataset()
-        df["FECHA_DIAGNOSTICO"] = pd.to_datetime(df["FECHA_DIAGNOSTICO"], errors='coerce')
-        df = df[df["PUNTAJE_RIESGO"].notnull() & df["FECHA_DIAGNOSTICO"].notnull()]
+        df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
+        df = df[df["risk_score"].notnull() & df["diagnosis_date"].notnull()]
 
-        df["TRIMESTRE"] = "T" + df["FECHA_DIAGNOSTICO"].dt.quarter.astype(str)
-        agrupado = df.groupby("TRIMESTRE", observed=False).agg(
-            promedio_riesgo=("PUNTAJE_RIESGO", "mean"),
-            total_pacientes=("PUNTAJE_RIESGO", "count")
+        df["diagnosis_quarter"] = "T" + df["diagnosis_date"].dt.quarter.astype(str)
+        agrupado = df.groupby("diagnosis_quarter", observed=False).agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
         ).reset_index()
 
         agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
-        agrupado["TRIMESTRE"] = agrupado["TRIMESTRE"].astype(str)
+        agrupado["diagnosis_quarter"] = agrupado["diagnosis_quarter"].astype(str)
 
         return agrupado.to_dict(orient="records")
 

@@ -14,12 +14,55 @@ router = APIRouter(
 )
 
 # Mapeo de features a categorías
+# CATEGORIAS = {
+#     "Factores Médicos": ['age', 'bmi', 'total_cholesterol', 'is_smoker', 'family_history'],
+#     "Condiciones Sociales": ['marital_status', 'occupation', 'education_level', 'socioeconomic_status'],
+#     "Infraestructura": ['has_electricity', 'has_water_supply', 'has_sewage', 'has_gas', 'has_internet'],
+#     "Ambientales/Geográficas": ['department', 'municipality'],
+#     "Otros Demográficos": ['sex', 'area', 'ethnicity']
+# }
+
 CATEGORIAS = {
-    "Factores Médicos": ['EDAD', 'IMC', 'COLESTEROL', 'FUMADOR', 'ANTECEDENTES_FAMILIARES'],
-    "Condiciones Sociales": ['ESTADO_CIVIL', 'OCUPACION', 'NIVEL_EDUCATIVO', 'ESTRATO'],
-    "Infraestructura": ['ACCESO_ELECTRICO', 'ACUEDUCTO', 'ALCANTARILLADO', 'GAS_NATURAL', 'INTERNET'],
-    "Ambientales/Geográficas": ['DEPARTAMENTO', 'MUNICIPIO'],
-    "Otros Demográficos": ['SEXO', 'AREA', 'ETNIA']
+    "Factores Médicos": [
+        'age',               # Edad (antes EDAD)
+        'bmi',               # IMC (antes IMC)
+        'total_cholesterol', # Colesterol total (antes COLESTEROL)
+        'is_smoker',         # Fumador (antes FUMADOR)
+        'family_history',    # Antecedentes familiares (antes ANTECEDENTES_FAMILIARES)
+        'heart_rate',        # Frecuencia cardíaca (nueva)
+        'glucose',           # Glucosa (nueva)
+        'diabetes',          # Diabetes (nueva)
+        'bpm_meds'           # Medicación para presión (antes bpm_meds)
+    ],
+    "Condiciones Sociales": [
+        'marital_status',    # Estado civil (antes ESTADO_CIVIL)
+        'occupation',        # Ocupación (antes OCUPACION)
+        'education_level',   # Nivel educativo (antes NIVEL_EDUCATIVO)
+        'socioeconomic_status' # Estrato (antes ESTRATO)
+    ],
+    "Infraestructura": [
+        'has_electricity',   # Acceso eléctrico (antes ACCESO_ELECTRICO)
+        'has_water_supply',  # Acueducto (antes ACUEDUCTO)
+        'has_sewage',        # Alcantarillado (antes ALCANTARILLADO)
+        'has_gas',           # Gas natural (antes GAS_NATURAL)
+        'has_internet',      # Internet (antes INTERNET)
+        'rural_area'         # Área rural (antes AREA)
+    ],
+    "Ambientales/Geográficas": [
+        'department',        # Departamento (antes DEPARTAMENTO)
+        'municipality',      # Municipio (antes MUNICIPIO)
+        'latitude',          # Latitud (nueva)
+        'longitude',         # Longitud (nueva)
+        'average_altitude',  # Altitud media (nueva)
+        'climate_classification' # Clasificación climática (nueva)
+    ],
+    "Otros Demográficos": [
+        'sex',               # Sexo (antes SEXO)
+        'ethnicity',         # Etnia (antes ETNIA)
+        'diagnosis_year',    # Año diagnóstico (nueva)
+        'diagnosis_month',   # Mes diagnóstico (nueva)
+        'pandemic_period'    # Periodo pandemia (nueva)
+    ]
 }
 
 class FeatureConfig(BaseModel):
@@ -65,9 +108,6 @@ async def get_feature_importance(
 
         importance, num_features = get_feature_weights(model)
 
-        print("número de Feature names: len(features_names)", len(feature_names))
-        print("número de num_features: num_features", num_features)
-        
         # Validate feature names match
         if len(feature_names) != num_features:
             raise HTTPException(
@@ -75,11 +115,11 @@ async def get_feature_importance(
                 detail="Feature count mismatch between model and dataset"
             )
 
-        # Create importance dictionary
+        # Create importance dictionary - updated column name prefixes
         features = [
             (name, float(imp)) 
             for name, imp in zip(feature_names, importance)
-            if not (exclude_geo and ("MUNICIPIO_" in name or "DEPARTAMENTO_" in name))
+            if not (exclude_geo and ("municipality_" in name or "department_" in name))
         ]
 
         # Apply filters
@@ -117,16 +157,16 @@ async def get_feature_importance(
 )
 async def get_municipality_importance(top: int = 10):
     """Get top municipalities by model feature importance"""
-    return await _get_geo_importance("MUNICIPIO_", top)
+    return await _get_geo_importance("municipality_", top)  # Updated prefix
 
 @router.get(
     "/geography/departments",
-    summary="Get department importance",
+    summary="Get department importance", 
     response_description="Department impact scores"
 )
 async def get_department_importance(top: int = 10):
-    """Get top departments by model feature importance"""
-    return await _get_geo_importance("DEPARTAMENTO_", top)
+    """Get top departments by model feature importance""" 
+    return await _get_geo_importance("department_", top)  # Updated prefix
 
 async def _get_geo_importance(prefix: str, top: int):
     """Shared logic for geographical features"""
@@ -186,10 +226,10 @@ async def get_feature_statistics(exclude_geo: bool = True):
 
         importance, num_features = get_feature_weights(model)
 
-        # Filter features if exclude_geo is True
+        # Filter features if exclude_geo is True - updated column name prefixes
         filtered_importance = [
             imp for name, imp in zip(feature_names, importance)
-            if not (exclude_geo and ("MUNICIPIO_" in name or "DEPARTAMENTO_" in name))
+            if not (exclude_geo and ("municipality_" in name or "department_" in name))
         ]
 
         if not filtered_importance:
@@ -244,11 +284,11 @@ async def get_least_important_features(
 
         importance, num_features = get_feature_weights(model)
 
-        # Filter features if exclude_geo is True
+        # Filter features if exclude_geo is True - updated column name prefixes
         features = [
             (name, float(imp))
             for name, imp in zip(feature_names, importance)
-            if not (exclude_geo and ("MUNICIPIO_" in name or "DEPARTAMENTO_" in name))
+            if not (exclude_geo and ("municipality_" in name or "department_" in name))
         ]
 
         # Sort by importance (ascending) and get the least important

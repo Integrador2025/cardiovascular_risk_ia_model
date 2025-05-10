@@ -8,6 +8,8 @@ import load
 
 router = APIRouter()
 
+router = APIRouter(prefix="/v1/metrics", tags=["Metrics"])
+
 @router.get("/metricas/")
 async def get_regression_metrics():
     try:
