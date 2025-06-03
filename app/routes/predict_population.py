@@ -4,9 +4,10 @@ import numpy as np
 import joblib
 import tensorflow as tf
 import os
-from app.model_population.data_processing_population import convert_precipitation
+from app.model_population.data_processing_population import convert_precipitation, preprocess_population_data
 from app.model_config import PACIENTES_PATH, MUNICIPIOS_PATH
-from app.model_population.utils_population import load_population_model
+from app.model_population.load_population_model import load_population_model # Importar la nueva función de carga
+from app.model_population.data_processing_population import load_and_group_population_data # Importar la función de carga y agrupación
 
 router = APIRouter(prefix="/v1/population", tags=["Population Prediction"])
 
@@ -21,127 +22,72 @@ async def predecir_riesgo_poblacional(municipio: str):
     - Number of groups analyzed
     """
     try:
-        # 1. Verify model files exist (removed columns.pkl check)
-        required_files = {
-            "model": "population_model.keras",
-            "scaler": "population_scaler.pkl",
-            "encoder": "population_encoder.pkl"
-        }
-        
-        missing_files = []
-        for file in required_files.values():
-            if not os.path.exists(f"model/{file}"):
-                missing_files.append(file)
-        
-        if missing_files:
+        # 1. Load model and preprocessors
+        model, scaler, encoder, feature_names_population = load_population_model()
+        if model is None or scaler is None or encoder is None or feature_names_population is None:
             raise HTTPException(
-                status_code=400,
-                detail=f"Model files missing: {', '.join(missing_files)}. Please train the model first."
+                status_code=404,
+                detail="Modelo poblacional o preprocesadores no encontrados. Por favor, entrene el modelo poblacional primero."
             )
 
         # 2. Load and merge data
         try:
-            df_pac = pd.read_csv(PACIENTES_PATH)
-            df_mun = pd.read_csv(MUNICIPIOS_PATH)
-            
-            # Normalize column names to lowercase
-            df_pac.columns = df_pac.columns.str.lower()
-            df_mun.columns = df_mun.columns.str.lower()
-            
-            df = df_pac.merge(df_mun, on=["department", "municipality"], how="left")
+            df = load_and_group_population_data(PACIENTES_PATH, MUNICIPIOS_PATH)
         except Exception as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Error loading data: {str(e)}"
+                detail=f"Error cargando datos: {str(e)}"
             )
 
-        # 3. Process precipitation data
-        if "annual_precipitation" in df.columns:
-            df["annual_precipitation"] = df["annual_precipitation"].astype(str).apply(convert_precipitation)
-
-        # 4. Filter by municipality
-        df_mpio = df[df["municipality"].str.strip().str.upper() == municipio.strip().upper()]
+        # 3. Filter by municipality
+        df_mpio = df[df["municipality"].str.strip().str.upper() == municipio.strip().upper()].copy() # Usar .copy() para evitar SettingWithCopyWarning
         if df_mpio.empty:
             raise HTTPException(
                 status_code=404,
-                detail=f"No data found for municipality: {municipio}"
+                detail=f"No se encontraron datos para el municipio: {municipio}"
             )
 
-        # 5. Group by demographic characteristics
-        grupos = df_mpio.groupby([
+        # 4. Preprocess the filtered data using the loaded preprocessors
+        # Asegurarse de que df_mpio tenga la columna 'risk_score' (aunque sea un placeholder) para preprocess_population_data
+        if 'risk_score' not in df_mpio.columns:
+            df_mpio['risk_score'] = 0.0 # Placeholder para que preprocess_population_data no falle
+            
+        X_processed_mpio, _, _, _, _ = preprocess_population_data(
+            df_mpio, 
+            scaler_obj=scaler, 
+            encoder_obj=encoder, 
+            feature_names_obj=feature_names_population # Pasar los nombres de las características para alineación
+        )
+
+        # 5. Make predictions
+        try:
+            predicciones = model.predict(X_processed_mpio).flatten()
+            df_mpio["risk_estimate"] = predicciones.tolist()
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Fallo en la predicción: {str(e)}"
+            )
+
+        # 6. Prepare response
+        # Agrupar de nuevo para el output, si es necesario, o usar los grupos originales con la estimación
+        # Si df_mpio ya está agrupado por las características demográficas relevantes, usarlo directamente
+        # Si no, agrupar para el output final como se hacía antes
+        
+        # Usar las columnas categóricas que se usaron para la agrupación original en load_and_group_population_data
+        categorical_cols_for_output = [
             "rural_area", "socioeconomic_status", "ethnicity", 
             "occupation", "education_level", "climate_classification"
-        ], as_index=False).agg({
-            "age": "mean",
-            "bmi": "mean",
-            "total_cholesterol": "mean",
-            "is_smoker": "mean",
-            "family_history": "mean",
-            "has_electricity": "mean",
-            "has_water_supply": "mean",
-            "has_sewage": "mean",
-            "has_gas": "mean",
-            "has_internet": "mean",
-            "latitude": "first",
-            "longitude": "first",
-            "average_altitude": "first",
-            "average_temperature": "first",
-            "annual_precipitation": "first",
-            "estimated_population": "first"
-        })
-
-        # 6. Load model and preprocessors (without columns file)
-        try:
-            model = tf.keras.models.load_model("model/population_model.keras")
-            scaler = joblib.load("model/population_scaler.pkl")
-            encoder = joblib.load("model/population_encoder.pkl")
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error loading model: {str(e)}"
-            )
-
-        # 7. Prepare features - define columns dynamically
-        categorical_cols = [
-            "rural_area", "socioeconomic_status", "ethnicity",
-            "occupation", "education_level", "climate_classification"
         ]
-        numerical_cols = [
-            col for col in grupos.columns 
-            if col not in categorical_cols + ["estimated_population"]
-        ]
+        
+        # Asegurarse de que solo las columnas existentes se incluyan en el output
+        final_output_cols = [col for col in categorical_cols_for_output if col in df_mpio.columns] + ["risk_estimate"]
 
-        try:
-            # Process categorical features
-            encoded_cat = encoder.transform(grupos[categorical_cols])
-            
-            # Process numerical features
-            scaled_num = scaler.transform(grupos[numerical_cols])
-            
-            # Combine features
-            X = np.concatenate([scaled_num, encoded_cat], axis=1)
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error preprocessing data: {str(e)}"
-            )
-
-        # 8. Make predictions
-        try:
-            predicciones = model.predict(X).flatten()
-            grupos["risk_estimate"] = predicciones.tolist()
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Prediction failed: {str(e)}"
-            )
-
-        # 9. Prepare response
         response_data = {
             "municipio": municipio,
-            "n_grupos": len(grupos),
+            "n_grupos": len(df_mpio), # Ahora df_mpio ya contiene los grupos
             "riesgo_promedio_total": round(float(np.mean(predicciones)), 4),
-            "grupos": grupos[categorical_cols + ["risk_estimate"]].to_dict(orient="records")
+            "grupos": df_mpio[final_output_cols].to_dict(orient="records")
         }
 
         return response_data
@@ -151,5 +97,5 @@ async def predecir_riesgo_poblacional(municipio: str):
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Unexpected error: {str(e)}"
+            detail=f"Error inesperado: {str(e)}"
         )

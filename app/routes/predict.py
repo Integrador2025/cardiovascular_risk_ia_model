@@ -1,3 +1,5 @@
+# app/routes/predict.py
+
 from fastapi import APIRouter, HTTPException
 import pandas as pd
 import numpy as np
@@ -23,44 +25,47 @@ def categorizar_riesgo(puntaje: float) -> str:
 @router.post("/predict")
 async def predecir_riesgo(paciente: PatientInput):
     try:
-        model, feature_names = load_model_and_features()
-        if model is None:
-            raise HTTPException(status_code=404, detail="Modelo no cargado")
+        # Cargar modelo, scaler y feature_names
+        model, scaler, feature_names = load_model_and_features()
+        if model is None or scaler is None or feature_names is None:
+            raise HTTPException(status_code=404, detail="Modelo o preprocesadores no cargados. Entrene el modelo primero.")
 
         # Convertir input a DataFrame
         df_input = pd.DataFrame([paciente.dict()])
 
-        # Columnas dummy para que preprocess_data no falle (actualizadas a nombres en inglés)
-        df_input["risk_score"] = 0  # Antes PUNTAJE_RIESGO
-        df_input["cardiovascular_risk"] = 0  # Antes RIESGO_CARDIOVASCULAR
-        df_input["diagnosis_date"] = pd.Timestamp("2024-01-01")  # Antes FECHA_DIAGNOSTICO
+        # Asegurarse de que las columnas objetivo y de fecha existan para preprocess_data
+        # Aunque sean placeholders, preprocess_data las espera
+        if 'risk_score' not in df_input.columns:
+            df_input["risk_score"] = 0.0
+        if 'cardiovascular_risk' not in df_input.columns:
+            df_input["cardiovascular_risk"] = 0
+        if 'diagnosis_date' not in df_input.columns:
+            df_input["diagnosis_date"] = pd.Timestamp("2024-01-01")
 
-        # Preprocesar datos del paciente
-        X_input, _, _, features_input = preprocess_data(df_input)
-
-        # Alinear con el orden de features esperadas por el modelo
-        X_alineado = np.zeros((1, len(feature_names)), dtype=np.float32)
-        for i, name in enumerate(features_input):
-            if name in feature_names:
-                idx = feature_names.index(name)
-                X_alineado[0, idx] = X_input[0, i]
-
+        # Preprocesar datos del paciente usando el scaler y feature_names cargados
+        X_input, _, _, _ = preprocess_data(df_input, scaler_obj=scaler, feature_names_obj=feature_names)
+        
         # Hacer predicción
-        pred = float(model.predict(X_alineado)[0][0])
+        pred = float(model.predict(X_input)[0][0])
         categoria = categorizar_riesgo(pred)
 
         # Calcular importancia de features para esta predicción
         first_dense = next((layer for layer in model.layers if hasattr(layer, 'kernel')), None)
         if first_dense is None:
-            raise HTTPException(status_code=500, detail="No se encontró capa densa en el modelo")
+            raise HTTPException(status_code=500, detail="No se encontró capa densa en el modelo para calcular importancia.")
             
         pesos = first_dense.get_weights()[0]
-        importancia = np.abs(pesos[:, 0])
-        activaciones = X_alineado[0]
-        ponderadas = importancia * activaciones
+        
+        # Calcular la importancia de las características (pesos absolutos de la primera capa)
+        # Multiplicar por las activaciones (valores de entrada) para obtener una "importancia ponderada"
+        # que es específica para esta predicción.
+        importancia_ponderada = np.abs(pesos[:, 0]) * X_input[0]
 
-        top_indices = np.argsort(ponderadas)[::-1][:5]
-        top_features = [(feature_names[i], round(float(ponderadas[i]), 4)) for i in top_indices]
+        # Obtener los índices de las 5 características más relevantes
+        top_indices = np.argsort(importancia_ponderada)[::-1][:5]
+        
+        # Crear la lista de tuplas (nombre_característica, valor_ponderado)
+        top_features = [(feature_names[i], round(float(importancia_ponderada[i]), 4)) for i in top_indices]
 
         return {
             "puntaje_riesgo": round(pred, 4),

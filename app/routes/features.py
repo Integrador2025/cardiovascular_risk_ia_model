@@ -1,7 +1,9 @@
+# app/routes/features.py
+
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pydantic import BaseModel
 from core.model_loader import load_model_and_features
 import tensorflow as tf
@@ -13,55 +15,25 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-# Mapeo de features a categorías
-# CATEGORIAS = {
-#     "Factores Médicos": ['age', 'bmi', 'total_cholesterol', 'is_smoker', 'family_history'],
-#     "Condiciones Sociales": ['marital_status', 'occupation', 'education_level', 'socioeconomic_status'],
-#     "Infraestructura": ['has_electricity', 'has_water_supply', 'has_sewage', 'has_gas', 'has_internet'],
-#     "Ambientales/Geográficas": ['department', 'municipality'],
-#     "Otros Demográficos": ['sex', 'area', 'ethnicity']
-# }
-
+# Mapeo de features a categorías (mantener en inglés para consistencia con el código, pero los comentarios pueden ser en español)
 CATEGORIAS = {
-    "Factores Médicos": [
-        'age',               # Edad (antes EDAD)
-        'bmi',               # IMC (antes IMC)
-        'total_cholesterol', # Colesterol total (antes COLESTEROL)
-        'is_smoker',         # Fumador (antes FUMADOR)
-        'family_history',    # Antecedentes familiares (antes ANTECEDENTES_FAMILIARES)
-        'heart_rate',        # Frecuencia cardíaca (nueva)
-        'glucose',           # Glucosa (nueva)
-        'diabetes',          # Diabetes (nueva)
-        'bpm_meds'           # Medicación para presión (antes bpm_meds)
+    "Medical Factors": [
+        'age', 'bmi', 'heart_rate', 'total_cholesterol', 'glucose',
+        'is_smoker', 'family_history', 'diabetes', 'bpm_meds'
     ],
-    "Condiciones Sociales": [
-        'marital_status',    # Estado civil (antes ESTADO_CIVIL)
-        'occupation',        # Ocupación (antes OCUPACION)
-        'education_level',   # Nivel educativo (antes NIVEL_EDUCATIVO)
-        'socioeconomic_status' # Estrato (antes ESTRATO)
+    "Social Conditions": [
+        'marital_status', 'occupation', 'education_level', 'socioeconomic_status'
     ],
-    "Infraestructura": [
-        'has_electricity',   # Acceso eléctrico (antes ACCESO_ELECTRICO)
-        'has_water_supply',  # Acueducto (antes ACUEDUCTO)
-        'has_sewage',        # Alcantarillado (antes ALCANTARILLADO)
-        'has_gas',           # Gas natural (antes GAS_NATURAL)
-        'has_internet',      # Internet (antes INTERNET)
-        'rural_area'         # Área rural (antes AREA)
+    "Infrastructure": [
+        'has_electricity', 'has_water_supply', 'has_sewage', 'has_gas', 
+        'has_internet', 'rural_area'
     ],
-    "Ambientales/Geográficas": [
-        'department',        # Departamento (antes DEPARTAMENTO)
-        'municipality',      # Municipio (antes MUNICIPIO)
-        'latitude',          # Latitud (nueva)
-        'longitude',         # Longitud (nueva)
-        'average_altitude',  # Altitud media (nueva)
-        'climate_classification' # Clasificación climática (nueva)
+    "Environmental/Geographical": [
+        'department', 'municipality', 'latitude', 'longitude', 
+        'average_altitude', 'average_temperature', 'annual_precipitation', 'climate_classification'
     ],
-    "Otros Demográficos": [
-        'sex',               # Sexo (antes SEXO)
-        'ethnicity',         # Etnia (antes ETNIA)
-        'diagnosis_year',    # Año diagnóstico (nueva)
-        'diagnosis_month',   # Mes diagnóstico (nueva)
-        'pandemic_period'    # Periodo pandemia (nueva)
+    "Other Demographic": [
+        'sex', 'ethnicity', 'diagnosis_year', 'diagnosis_month', 'days_since_diagnosis', 'pandemic_period'
     ]
 }
 
@@ -70,7 +42,7 @@ class FeatureConfig(BaseModel):
     threshold: Optional[float] = None
 
 def get_feature_weights(model) -> tuple:
-    """Centralized feature weight calculation"""
+    """Calculates and returns the absolute mean weights from the first dense layer of the model."""
     dense_layers = [layer for layer in model.layers if isinstance(layer, tf.keras.layers.Dense)]
     
     if not dense_layers:
@@ -81,6 +53,7 @@ def get_feature_weights(model) -> tuple:
     
     first_dense = dense_layers[0]
     weights = first_dense.get_weights()[0]
+    # Retorna la importancia (promedio absoluto de los pesos) y el número de características de entrada
     return np.mean(np.abs(weights), axis=1), weights.shape[0]
 
 @router.get(
@@ -99,11 +72,12 @@ async def get_feature_importance(
     - Exclude geographical features
     """
     try:
-        model, feature_names = load_model_and_features()
-        if model is None:
+        # Cargar modelo, scaler y feature_names
+        model, _, feature_names = load_model_and_features()
+        if model is None or feature_names is None: # Scaler no es necesario aquí
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model not found. Train a model first."
+                detail="Model or feature names not found. Train a model first."
             )
 
         importance, num_features = get_feature_weights(model)
@@ -112,7 +86,7 @@ async def get_feature_importance(
         if len(feature_names) != num_features:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Feature count mismatch between model and dataset"
+                detail="Feature count mismatch between model and loaded feature names."
             )
 
         # Create importance dictionary - updated column name prefixes
@@ -128,6 +102,12 @@ async def get_feature_importance(
             
         if config.threshold:
             features = [f for f in features if f[1] >= config.threshold]
+
+        if not features:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No features found after applying filters."
+            )
 
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -157,7 +137,7 @@ async def get_feature_importance(
 )
 async def get_municipality_importance(top: int = 10):
     """Get top municipalities by model feature importance"""
-    return await _get_geo_importance("municipality_", top)  # Updated prefix
+    return await _get_geo_importance("municipality_", top)
 
 @router.get(
     "/geography/departments",
@@ -166,16 +146,17 @@ async def get_municipality_importance(top: int = 10):
 )
 async def get_department_importance(top: int = 10):
     """Get top departments by model feature importance""" 
-    return await _get_geo_importance("department_", top)  # Updated prefix
+    return await _get_geo_importance("department_", top)
 
 async def _get_geo_importance(prefix: str, top: int):
     """Shared logic for geographical features"""
     try:
-        model, feature_names = load_model_and_features()
-        if model is None:
+        # Cargar modelo, scaler y feature_names
+        model, _, feature_names = load_model_and_features()
+        if model is None or feature_names is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model not found. Train a model first."
+                detail="Model or feature names not found. Train a model first."
             )
 
         importance, _ = get_feature_weights(model)
@@ -217,11 +198,12 @@ async def get_feature_statistics(exclude_geo: bool = True):
     - Total number of features
     """
     try:
-        model, feature_names = load_model_and_features()
-        if model is None:
+        # Cargar modelo, scaler y feature_names
+        model, _, feature_names = load_model_and_features()
+        if model is None or feature_names is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model not found. Train a model first."
+                detail="Model or feature names not found. Train a model first."
             )
 
         importance, num_features = get_feature_weights(model)
@@ -275,11 +257,12 @@ async def get_least_important_features(
     Get the least important features based on model weights.
     """
     try:
-        model, feature_names = load_model_and_features()
-        if model is None:
+        # Cargar modelo, scaler y feature_names
+        model, _, feature_names = load_model_and_features()
+        if model is None or feature_names is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model not found. Train a model first."
+                detail="Model or feature names not found. Train a model first."
             )
 
         importance, num_features = get_feature_weights(model)
@@ -314,13 +297,14 @@ async def get_least_important_features(
 @router.get("/por-categoria")
 async def importancia_por_categoria(incluir_geo: bool = False):
     try:
-        model, feature_names = load_model_and_features()
-        if model is None:
-            raise HTTPException(status_code=404, detail="Modelo no encontrado")
+        # Cargar modelo, scaler y feature_names
+        model, _, feature_names = load_model_and_features()
+        if model is None or feature_names is None:
+            raise HTTPException(status_code=404, detail="Modelo o nombres de características no encontrados.")
 
         first_dense = next((layer for layer in model.layers if hasattr(layer, 'kernel')), None)
         if first_dense is None:
-            raise HTTPException(status_code=500, detail="No se encontró una capa densa con pesos")
+            raise HTTPException(status_code=500, detail="No se encontró una capa densa con pesos en el modelo.")
 
         pesos = first_dense.get_weights()[0]
         importancias = dict(zip(feature_names, np.mean(np.abs(pesos), axis=1)))
@@ -330,23 +314,30 @@ async def importancia_por_categoria(incluir_geo: bool = False):
         for feat, valor in importancias.items():
             asignado = False
             for categoria, base_names in CATEGORIAS.items():
+                # Comprobar si la característica comienza con alguno de los nombres base
                 if any(feat.startswith(base) for base in base_names):
-                    if not incluir_geo and categoria == "Ambientales/Geográficas":
+                    # Excluir categorías geográficas si se especifica
+                    if not incluir_geo and categoria == "Environmental/Geographical":
                         continue
                     resumen[categoria] += float(valor)
                     asignado = True
                     break
             if not asignado:
-                resumen["Otras"] += float(valor)
+                resumen["Others"] += float(valor) # Cambiado a "Others" para consistencia
 
         total = sum(resumen.values())
+        if total == 0:
+            raise HTTPException(status_code=500, detail="El total de importancia de características es cero, no se pueden calcular porcentajes.")
+
         porcentajes = {cat: round(float(val / total), 4) for cat, val in resumen.items()}
 
         return {
-            "totales": resumen,
-            "porcentajes": porcentajes,
-            "nota": "Basado en la primera capa densa del modelo. Se agruparon variables por tipo semántico."
+            "totals": resumen,
+            "percentages": porcentajes,
+            "note": "Based on the first dense layer of the model. Variables grouped by semantic type."
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al calcular importancias por categoría: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error calculating importance by category: {str(e)}")

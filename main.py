@@ -1,7 +1,10 @@
+# main.py
+
 from fastapi import FastAPI
-import py_eureka_client.eureka_client as eureka_client
-import asyncio
-from app.routes import training, features, metrics, analisis, summary, predict,predict_population
+# import py_eureka_client.eureka_client as eureka_client
+# import asyncio
+from app.routes import training, features, metrics, analisis, summary, predict, predict_population
+from app.routes import socio_environmental, comparision
 
 app = FastAPI(
     title="API de Riesgo Cardiovascular",
@@ -33,6 +36,8 @@ app.include_router(analisis.router)
 app.include_router(summary.router)
 app.include_router(predict.router)
 app.include_router(predict_population.router)
+app.include_router(socio_environmental.router)
+app.include_router(comparision.router)
 
 @app.get("/")
 def read_root():
