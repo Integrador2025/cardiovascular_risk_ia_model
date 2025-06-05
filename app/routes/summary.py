@@ -11,7 +11,7 @@ import load
 
 router = APIRouter(
     prefix="/v1/summary",
-    tags=["Resumen por Departamento"]
+    tags=["Resumen por Departamento"] # Cambiado el tag, ahora incluye más que solo departamento
 )
 
 def categorizar_riesgo(promedio: float) -> str:
@@ -341,6 +341,9 @@ async def analisis_por_estrato(min_pacientes: int = Query(10, description="Minim
 
 @router.get("/por-año")
 async def analisis_por_año():
+    """
+    Returns annual cardiovascular risk analysis globally.
+    """
     try:
         df, _, _ = load.load_dataset()
         df.columns = df.columns.str.lower() # Asegurar minúsculas
@@ -366,6 +369,198 @@ async def analisis_por_año():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en análisis por año: {str(e)}")
+
+
+@router.get("/por-año-departamento/{departamento}")
+async def analisis_por_año_departamento(departamento: str):
+    """
+    Returns annual cardiovascular risk analysis for a specific department.
+    """
+    try:
+        df, _, _ = load.load_dataset()
+        df.columns = df.columns.str.lower() # Asegurar minúsculas
+
+        # Convert diagnosis_date to datetime FIRST
+        df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
+
+        # Check if the department actually exists in the original dataset before any cleaning
+        if departamento.upper() not in df['department'].str.upper().unique():
+            raise HTTPException(status_code=404, detail=f"Department '{departamento}' not found in the dataset. Please check the spelling.")
+
+        # Filter by department first
+        df_filtrado = df[df["department"].str.upper() == departamento.upper()].copy() # Use .copy()
+
+        # Now apply cleaning filters on the filtered DataFrame
+        df_filtrado = df_filtrado[
+            df_filtrado["risk_score"].notnull() & 
+            df_filtrado["diagnosis_date"].notnull()
+        ] # department.notnull() is implicitly true now
+
+        if df_filtrado.empty:
+            raise HTTPException(status_code=404, detail=f"No valid patient data (missing risk score or diagnosis date) found for department '{departamento}' after cleaning.")
+
+        df_filtrado["diagnosis_year"] = df_filtrado["diagnosis_date"].dt.year
+        agrupado = df_filtrado.groupby("diagnosis_year").agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
+        ).reset_index()
+
+        if agrupado.empty:
+            raise HTTPException(status_code=404, detail=f"No annual data found for department '{departamento}'.")
+
+        agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
+        agrupado["diagnosis_year"] = agrupado["diagnosis_year"].astype(int)
+
+        return agrupado.to_dict(orient="records")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en análisis por año para departamento '{departamento}': {str(e)}")
+
+
+@router.get("/por-año-municipio/{municipio}")
+async def analisis_por_año_municipio(municipio: str):
+    """
+    Returns annual cardiovascular risk analysis for a specific municipality.
+    """
+    try:
+        df, _, _ = load.load_dataset()
+        df.columns = df.columns.str.lower() # Asegurar minúsculas
+
+        # Convert diagnosis_date to datetime FIRST
+        df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
+
+        # Check if the municipality actually exists in the original dataset before any cleaning
+        if municipio.upper() not in df['municipality'].str.upper().unique():
+            raise HTTPException(status_code=404, detail=f"Municipality '{municipio}' not found in the dataset. Please check the spelling.")
+
+        # Filter by municipality first
+        df_filtrado = df[df["municipality"].str.upper() == municipio.upper()].copy() # Use .copy()
+
+        # Now apply cleaning filters on the filtered DataFrame
+        df_filtrado = df_filtrado[
+            df_filtrado["risk_score"].notnull() & 
+            df_filtrado["diagnosis_date"].notnull()
+        ] # municipality.notnull() is implicitly true now
+
+        if df_filtrado.empty:
+            raise HTTPException(status_code=404, detail=f"No valid patient data (missing risk score or diagnosis date) found for municipality '{municipio}' after cleaning.")
+
+        df_filtrado["diagnosis_year"] = df_filtrado["diagnosis_date"].dt.year
+        agrupado = df_filtrado.groupby("diagnosis_year").agg(
+            promedio_riesgo=("risk_score", "mean"),
+            total_pacientes=("risk_score", "count")
+        ).reset_index()
+
+        if agrupado.empty:
+            raise HTTPException(status_code=404, detail=f"No annual data found for municipality '{municipio}'.")
+
+        agrupado["categoria"] = agrupado["promedio_riesgo"].apply(categorizar_riesgo)
+        agrupado["diagnosis_year"] = agrupado["diagnosis_year"].astype(int)
+
+        return agrupado.to_dict(orient="records")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en análisis por año para municipio '{municipio}': {str(e)}")
+
+
+@router.get("/total-pacientes-por-año")
+async def total_pacientes_por_año():
+    """
+    Returns the total number of patients per year globally.
+    Useful for trend analysis of data volume over time.
+    """
+    try:
+        df, _, _ = load.load_dataset()
+        df.columns = df.columns.str.lower() # Ensure lowercase column names
+
+        # Filter out rows where diagnosis_date or risk_score are null,
+        # as these are essential for determining a "patient record" for this context.
+        df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
+        df = df[df["diagnosis_date"].notnull()]
+
+        if df.empty:
+            raise HTTPException(status_code=404, detail="No data available for analysis after cleaning.")
+
+        df["diagnosis_year"] = df["diagnosis_date"].dt.year
+        
+        # Group by year and count the number of patients
+        agrupado = df.groupby("diagnosis_year").agg(
+            total_pacientes=("diagnosis_year", "count") # Count occurrences of the year, effectively counting patients
+        ).reset_index()
+
+        if agrupado.empty:
+            raise HTTPException(status_code=404, detail="No patient data found per year.")
+
+        agrupado["diagnosis_year"] = agrupado["diagnosis_year"].astype(int)
+        agrupado["total_pacientes"] = agrupado["total_pacientes"].astype(int)
+
+        return agrupado.to_dict(orient="records")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en la consulta de total de pacientes por año: {str(e)}")
+    
+@router.get("/distribucion-categoria-por-año/{nombre_caracteristica}")
+async def distribucion_categoria_por_año(nombre_caracteristica: str):
+    """
+    Returns the distribution (percentages) of a specified categorical feature per year.
+    Useful for visualizing trends in categorical data over time (e.g., sex distribution over years).
+    """
+    try:
+        df, _, _ = load.load_dataset()
+        df.columns = df.columns.str.lower() # Asegurar minúsculas
+
+        df["diagnosis_date"] = pd.to_datetime(df["diagnosis_date"], errors='coerce')
+        
+        # Validar que la característica exista y no sea nula
+        if nombre_caracteristica not in df.columns:
+            raise HTTPException(status_code=404, detail=f"Feature '{nombre_caracteristica}' not found in the dataset.")
+        
+        df = df[df[nombre_caracteristica].notnull() & df["diagnosis_date"].notnull()]
+
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"No data available for feature '{nombre_caracteristica}' or diagnosis date after cleaning.")
+
+        df["diagnosis_year"] = df["diagnosis_date"].dt.year
+        
+        # Calcular el total de pacientes por año para normalización
+        total_por_año = df.groupby("diagnosis_year").size().reset_index(name='total_anual')
+        
+        # Agrupar por año y la característica, y contar ocurrencias
+        agrupado = df.groupby(["diagnosis_year", nombre_caracteristica]).size().reset_index(name='count')
+        
+        # Unir con el total anual para calcular porcentajes
+        agrupado = pd.merge(agrupado, total_por_año, on="diagnosis_year")
+        agrupado["percentage"] = (agrupado["count"] / agrupado["total_anual"] * 100).round(2)
+
+        # Formatear la salida para el dashboard
+        results = []
+        for year in sorted(df["diagnosis_year"].unique()):
+            year_data = agrupado[agrupado["diagnosis_year"] == year]
+            if not year_data.empty:
+                category_percentages = {}
+                for _, row in year_data.iterrows():
+                    category_percentages[str(row[nombre_caracteristica])] = float(row["percentage"])
+                
+                results.append({
+                    "year": int(year),
+                    "category_percentages": category_percentages
+                })
+        
+        if not results:
+            raise HTTPException(status_code=404, detail=f"No data found for feature '{nombre_caracteristica}' per year.")
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en la consulta de distribución de categoría por año para '{nombre_caracteristica}': {str(e)}")
 
 @router.get("/por-trimestre")
 async def analisis_por_trimestre():

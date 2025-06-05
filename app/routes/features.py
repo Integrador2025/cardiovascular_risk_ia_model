@@ -17,11 +17,11 @@ router = APIRouter(
 
 # Mapeo de features a categorías (mantener en inglés para consistencia con el código, pero los comentarios pueden ser en español)
 CATEGORIAS = {
-    "Medical Factors": [
+    "Medical_Factors": [
         'age', 'bmi', 'heart_rate', 'total_cholesterol', 'glucose',
         'is_smoker', 'family_history', 'diabetes', 'bpm_meds'
     ],
-    "Social Conditions": [
+    "Social_Conditions": [
         'marital_status', 'occupation', 'education_level', 'socioeconomic_status'
     ],
     "Infrastructure": [
@@ -32,7 +32,7 @@ CATEGORIAS = {
         'department', 'municipality', 'latitude', 'longitude', 
         'average_altitude', 'average_temperature', 'annual_precipitation', 'climate_classification'
     ],
-    "Other Demographic": [
+    "Other_Demographic": [
         'sex', 'ethnicity', 'diagnosis_year', 'diagnosis_month', 'days_since_diagnosis', 'pandemic_period'
     ]
 }
