@@ -1,5 +1,7 @@
 # app/routes/predict.py
 
+from fastapi.responses import PlainTextResponse
+import json
 from fastapi import APIRouter, HTTPException
 import pandas as pd
 import numpy as np
@@ -33,8 +35,7 @@ async def predecir_riesgo(paciente: PatientInput):
         # Convertir input a DataFrame
         df_input = pd.DataFrame([paciente.dict()])
 
-        # Asegurarse de que las columnas objetivo y de fecha existan para preprocess_data
-        # Aunque sean placeholders, preprocess_data las espera
+        # Asegurar columnas necesarias
         if 'risk_score' not in df_input.columns:
             df_input["risk_score"] = 0.0
         if 'cardiovascular_risk' not in df_input.columns:
@@ -42,37 +43,35 @@ async def predecir_riesgo(paciente: PatientInput):
         if 'diagnosis_date' not in df_input.columns:
             df_input["diagnosis_date"] = pd.Timestamp("2024-01-01")
 
-        # Preprocesar datos del paciente usando el scaler y feature_names cargados
+        # Preprocesar
         X_input, _, _, _ = preprocess_data(df_input, scaler_obj=scaler, feature_names_obj=feature_names)
-        
-        # Hacer predicción
+
+        # Predecir
         pred = float(model.predict(X_input)[0][0])
         categoria = categorizar_riesgo(pred)
 
-        # Calcular importancia de features para esta predicción
+        # Capa densa y pesos
         first_dense = next((layer for layer in model.layers if hasattr(layer, 'kernel')), None)
         if first_dense is None:
             raise HTTPException(status_code=500, detail="No se encontró capa densa en el modelo para calcular importancia.")
-            
-        pesos = first_dense.get_weights()[0]
-        
-        # Calcular la importancia de las características (pesos absolutos de la primera capa)
-        # Multiplicar por las activaciones (valores de entrada) para obtener una "importancia ponderada"
-        # que es específica para esta predicción.
-        importancia_ponderada = np.abs(pesos[:, 0]) * X_input[0]
 
-        # Obtener los índices de las 5 características más relevantes
+        pesos = first_dense.get_weights()[0]
+        importancia_ponderada = np.abs(pesos[:, 0]) * X_input[0]
         top_indices = np.argsort(importancia_ponderada)[::-1][:5]
-        
-        # Crear la lista de tuplas (nombre_característica, valor_ponderado)
         top_features = [(feature_names[i], round(float(importancia_ponderada[i]), 4)) for i in top_indices]
 
-        return {
+        # Construir resultado y serializar
+        resultado = {
             "puntaje_riesgo": round(pred, 4),
             "categoria": categoria,
             "factores_relevantes": top_features,
             "nota": "Factores relevantes calculados como activación * peso en la primera capa densa"
         }
+
+        json_data = json.dumps(resultado)
+        escaped_string = json.dumps(json_data)
+
+        return PlainTextResponse(content=escaped_string, media_type="text/plain")
 
     except HTTPException:
         raise

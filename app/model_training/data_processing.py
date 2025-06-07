@@ -58,14 +58,14 @@ def preprocess_data(df, augment=False, noise_std=0.01, augment_factor=1,
     # Definir features (nombres en minúsculas para consistencia)
     numeric_features = [
         'age', 'bmi', 'heart_rate', 'total_cholesterol', 'glucose',
-        'is_smoker', 'bpm_meds', 'diabetes', 'rural_area',
+        'is_smoker', 'bpm_meds', 'diabetes',
         'has_electricity', 'has_water_supply', 'has_gas', 
         'has_internet', 'family_history',
         'diagnosis_year', 'diagnosis_month', 'days_since_diagnosis', 'pandemic_period'
     ]
 
     categorical_features = [
-        'department', 'municipality', 'sex', 'marital_status',
+        'department', 'municipality', 'sex', 'marital_status', 'rural_area',
         'education_level', 'socioeconomic_status', 'occupation', 'ethnicity',
         'climate_classification', # Añadir climate_classification aquí si está en df_mun y se fusiona
         'diagnosis_trimester'

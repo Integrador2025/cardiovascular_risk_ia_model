@@ -17,10 +17,9 @@ class PatientInput(BaseModel):
     heart_rate: int
     glucose: float
     diabetes: int
-    rural_area: int
+    rural_area: str
     has_electricity: int
     has_water_supply: int
-    has_sewage: int
     has_gas: int
     has_internet: int
     ethnicity: str
